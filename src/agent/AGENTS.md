@@ -5,7 +5,7 @@
 
 ## 使用指南
 - 使用 `uv run pytest` 而不是 `pytest` 来运行测试
-- 每次修改后都要提交更改
+- 完成了任务后,请执行`git commit`保存当前变更
 - 提交信息应该类似于 `feat: add a new feature` 或 `fix: fix a bug`，必须以 "committed by AI assistant" 结尾
 
 ## 项目结构
@@ -15,3 +15,7 @@
 - `aidev_agent/packages` 被所有其他模块使用，主要供 SDK 用户使用，目前扩展了一些 langchain 模块，如 `tool` 和 `chat_models`
 - `aidev_agent/schemas` 包含 SDK 的所有模式定义
 - `aidev_agent/utils` 包含一些难以分类的实用工具函数
+
+## 单元测试编写规则
+- 尽量使用参数化单元测试,减少重复代码
+- 单元测试函数不能超过30行
