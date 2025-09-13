@@ -193,3 +193,4 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 .aider*
 .vscode/
+.codebuddy/

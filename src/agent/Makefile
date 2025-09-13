@@ -57,19 +57,3 @@ clean:
 	rm -rf ./dist
 	rm -rf .venv
 	uv clean
-
-.PHONY: makemigrations
-makemigrations:
-	uv run python manage.py makemigrations
-
-.PHONY: api_doc
-api_doc:
-	uv run python manage.py spectacular --file schema.yml
-	uv run python manage.py generate_api_docs
-
-.PHONY: intergration-test
-intergration-test:
-	$(eval path ?= ${ROOT_DIR}/tests/intergration)
-	$(eval maxfail ?= --maxfail=2)
-	$(eval warnings ?= --disable-pytest-warnings)
-	${pytest} ${path} -s --durations=100

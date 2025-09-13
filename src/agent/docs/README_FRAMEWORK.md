@@ -2,7 +2,7 @@
 
 ## 概览
 
-**当前版本**：1.0.0b9
+**当前版本**：1.0.0b38
 
 ### 支持的能力：
 
@@ -18,7 +18,7 @@
 Python版本：>=3.10;
 
 ```
-$ pip install aidev-agent==1.0.0b9
+$ pip install aidev-agent==1.0.0b38
 ```
 
 ### 2. 使用样例
@@ -49,7 +49,7 @@ BK_API_URL_TMPL=http://{api_name}.xxx.com
 #### 样例1：调用 LLM Gateway 大模型服务
 
 ```python
-from aidev_agent.core.extend.models.llm_gateway import ChatModel
+from aidev_agent.packages.langchain.chat_models import ChatModel
 model = ChatModel.get_setup_instance(model="hunyuan")
 result = model.invoke("hi")
 print(result)
