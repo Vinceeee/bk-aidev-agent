@@ -54,3 +54,8 @@ asyncio_mode = "auto"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[tool.coverage.run]
+omit = [
+  "tests/*",
+]

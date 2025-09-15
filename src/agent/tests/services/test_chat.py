@@ -1,221 +1,311 @@
-import json
+from unittest.mock import Mock, patch
 
 import pytest
-from aidev_agent.api.bk_aidev import BKAidevApi
-from aidev_agent.config import settings
-from aidev_agent.core.extend.agent.qa import CommonQAAgent
-from aidev_agent.core.extend.models.llm_gateway import ChatModel
-from aidev_agent.services.chat import ChatCompletionAgent, ExecuteKwargs
-from aidev_agent.services.pydantic_models import (
-    AgentOptions,
-    ChatPrompt,
-    FineGrainedScoreType,
-    IntentRecognition,
-    KnowledgebaseSettings,
-)
-from langchain_core.messages.ai import AIMessage
-from langchain_core.messages.human import HumanMessage
+from aidev_agent.enums import PromptRole
+from aidev_agent.exceptions import AgentException
+from aidev_agent.services.chat import ChatCompletionAgent
+from aidev_agent.services.pydantic_models import AgentOptions, ChatPrompt, ExecuteKwargs
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 @pytest.fixture
-def add_session():
-    client = BKAidevApi.get_client()
-    session_code = "onlyfortest1"
-    client.api.create_chat_session(json={"session_code": session_code, "session_name": "testonly"})
-    # 添加一些session content
-    client.api.create_chat_session_content(
-        json={
-            "session_code": session_code,
-            "role": "user",
-            "content": "明天深圳天气怎么样?",
-            "status": "success",
-        }
-    )
-    yield session_code
-    result = client.api.get_chat_session_contents(params={"session_code": session_code})
-    for each in result.get("data", []):
-        _id = each["id"]
-        client.api.destroy_chat_session_content(path_params={"id": _id})
-    client.api.destroy_chat_session(path_params={"session_code": session_code})
+def mock_chat_model():
+    """创建模拟的聊天模型"""
+    model = Mock(spec=BaseChatModel)
+    model.model_name = "test-model"
+    model.invoke.return_value = Mock(content="Test response", id="test-id", additional_kwargs={})
+    return model
 
 
-@pytest.mark.skipif(
-    not all([settings.LLM_GW_ENDPOINT, settings.APP_CODE, settings.SECRET_KEY]),
-    reason="没有配置足够的环境变量,跳过该测试",
-)
-def test_common_agent_chat_streaming(add_session):
-    llm = ChatModel.get_setup_instance(model="hunyuan-turbos")
-    client = BKAidevApi.get_client()
-    session_code = add_session
-    knowledge_base_ids = [2]
-    tool_codes = ["weather-query"]
-
-    result = client.api.get_chat_session_context(path_params={"session_code": session_code})
-    knowledge_bases = [
-        client.api.appspace_retrieve_knowledgebase(path_params={"id": _id})["data"] for _id in knowledge_base_ids
-    ]
-    tools = [client.construct_tool(tool_code) for tool_code in tool_codes]
-
-    agent = ChatCompletionAgent(
-        chat_model=llm,
-        chat_history=[ChatPrompt.model_validate(each) for each in result.get("data", [])],
-        knowledge_bases=knowledge_bases,
-        tools=tools,
-    )
-    for each in agent.execute(ExecuteKwargs(stream=True)):
-        print(each)
-
-
-@pytest.mark.skipif(
-    not all([settings.LLM_GW_ENDPOINT, settings.APP_CODE, settings.SECRET_KEY]),
-    reason="没有配置足够的环境变量,跳过该测试",
-)
-def test_CommonQAAgent_chat_streaming():
-    # 设置chat_model实例
-    chat_model = ChatModel.get_setup_instance(
-        # model="hunyuan-turbo",
-        # model="gpt-4o",
-        # model="gpt-4o-mini",
-        # model="deepseek-v3",
-        model="deepseek-r1",
-        # model="deepseek-r1-14b",
-        # model="deepseek-r1-32b",
-        # model="deepseek-r1-70b",
-        streaming=True,
-    )
-
-    # 设置kb_model实例
-    kb_model = ChatModel.get_setup_instance(
-        model="hunyuan-turbo",
-        streaming=True,
-    )
-
-    # 获取客户端对象
-    client = BKAidevApi.get_client_by_username(username="")
-
-    # 设置工具
-    tool_codes = ["weather-query"]
-    tools = [client.construct_tool(tool_code) for tool_code in tool_codes]
-    knowledge_bases = [client.api.appspace_retrieve_knowledgebase(path_params={"id": 58})["data"]]
-    qa_response_kb_ids = [254]
-    qa_response_knowledge_bases = [
-        client.api.appspace_retrieve_knowledgebase(path_params={"id": id_})["data"] for id_ in qa_response_kb_ids
-    ]
-    # 获取代理执行器和配置
-    chat_history = [HumanMessage(content="你好"), AIMessage(content="你好，请问有什么可以帮您？")]
-    agent_options = AgentOptions(
-        intent_recognition_options=IntentRecognition(
-            force_process_by_agent=False,
-            role_prompt="",
-            intent_recognition_knowledgebase_id=[276],
-            intent_recognition_topk=10,
-            intent_recognition_llm="deepseek-r1",
-        ),
-        knowledge_query_options=KnowledgebaseSettings(
-            knowledge_bases=knowledge_bases,
-            qa_response_kb_ids=qa_response_kb_ids,
-            qa_response_knowledge_bases=qa_response_knowledge_bases,
-            knowledge_resource_reject_threshold=(0.001, 0.1),
-            topk=10,
-            knowledge_resource_fine_grained_score_type=FineGrainedScoreType.LLM.value,
-            is_response_when_no_knowledgebase_match=True,
-            rejection_message="抱歉，我无法回答你的问题。",
-        ),
-    )
-    agent_e, cfg = CommonQAAgent.get_agent_executor(
-        chat_model,
-        kb_model,
-        extra_tools=tools,
-        chat_history=chat_history,
-        agent_options=agent_options,
-    )
-
-    # 测试部分
-    test_case_inputs = {"input": "云桌面绿屏"}
-    for each in agent_e.agent.stream_standard_event(agent_e, cfg, test_case_inputs, timeout=2):
-        if each == "data: [DONE]\n\n":
-            break
-        if each:
-            chunk = json.loads(each[6:])
-            print(f"\n=====> {chunk}\n")  # 方便跟其他标准输出区分开来
-
-
-@pytest.mark.skipif(
-    not all([settings.LLM_GW_ENDPOINT, settings.APP_CODE, settings.SECRET_KEY]),
-    reason="没有配置足够的环境变量,跳过该测试",
-)
-def test_qa_response(test_input, expected_kb_ids):
-    # 初始化聊天模型
-    chat_model = ChatModel.get_setup_instance(
-        model="hunyuan-t1",
-        streaming=True,
-    )
-
-    # 初始化知识库模型
-    kb_model = ChatModel.get_setup_instance(
-        model="hunyuan-turbo",
-        streaming=True,
-    )
-
-    client = BKAidevApi.get_client_by_username(username="")
-    tools = [client.construct_tool("weather-query")]
-    knowledge_bases = [client.api.appspace_retrieve_knowledgebase(path_params={"id": 58})["data"]]
-    qa_response_knowledge_bases = [
-        client.api.appspace_retrieve_knowledgebase(path_params={"id": id_})["data"] for id_ in expected_kb_ids
-    ]
-    # 配置带参数的智能体选项
-    agent_options = AgentOptions(
-        intent_recognition_options=IntentRecognition(
-            force_process_by_agent=False,
-            role_prompt="",
-        ),
-        knowledge_query_options=KnowledgebaseSettings(
-            knowledge_bases=knowledge_bases,
-            qa_response_kb_ids=expected_kb_ids,
-            qa_response_knowledge_bases=qa_response_knowledge_bases,
-            knowledge_resource_reject_threshold=(0.001, 0.1),
-            topk=10,
-            knowledge_resource_fine_grained_score_type=FineGrainedScoreType.LLM.value,
-            is_response_when_no_knowledgebase_match=True,
-            rejection_message="无法回答该问题",
-        ),
-    )
-
-    # 初始化智能体执行器
-    agent_e, cfg = CommonQAAgent.get_agent_executor(
-        chat_model,
-        kb_model,
-        extra_tools=tools,
-        chat_history=[HumanMessage(content="你好"), AIMessage(content="你好！")],
-        agent_options=agent_options,
-    )
-
-    for each in agent_e.agent.stream_standard_event(agent_e, cfg, test_input, timeout=2):
-        if each == "data: [DONE]\n\n":
-            break
-        if each:
-            chunk = json.loads(each[6:])
-            print(f"\n=====> {chunk}\n")  # 方便跟其他标准输出区分开来
-
-
-@pytest.mark.skipif(
-    not all([settings.LLM_GW_ENDPOINT, settings.APP_CODE, settings.SECRET_KEY]),
-    reason="没有配置足够的环境变量,跳过该测试",
-)
-def test_qa_response_sequence():
-    """按特定顺序执行测试用例"""
-    test_cases = [
-        ({"input": "世界最高盐度海域"}, [254]),
-        ({"input": "世界最高盐度海域"}, []),
-        # ({"input": "云桌面本地双屏设置"}, [254]),
-        # ({"input": "云桌面本地双屏设置"}, []),
+@pytest.fixture
+def sample_chat_history():
+    """创建示例聊天历史"""
+    return [
+        ChatPrompt(role="system", content="You are a helpful assistant"),
+        ChatPrompt(role="user", content="Hello"),
+        ChatPrompt(role="assistant", content="Hi there!"),
     ]
 
-    for test_input, expected_kb_ids in test_cases:
-        print(f"\n=== 正在执行测试用例: {test_input['input']} ===")
-        test_qa_response(test_input, expected_kb_ids)
+
+@pytest.fixture
+def sample_agent_options():
+    """创建示例智能体选项"""
+    return AgentOptions()
 
 
-def test_agent_option():
-    options = AgentOptions()
-    assert options
+class TestChatCompletionAgent:
+    """测试 ChatCompletionAgent 类"""
+
+    def test_init_with_required_params(self, mock_chat_model, sample_chat_history):
+        """测试使用必需参数初始化"""
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        assert agent.chat_model == mock_chat_model
+        assert agent.chat_history == sample_chat_history
+        assert agent.files == []
+        assert agent.tools is None
+        assert agent.support_vision is False
+
+    @pytest.mark.parametrize("support_vision,expected", [(True, True), (False, False)])
+    def test_init_with_vision_support(self, mock_chat_model, sample_chat_history, support_vision, expected):
+        """测试视觉支持参数"""
+        agent = ChatCompletionAgent(
+            chat_model=mock_chat_model, chat_history=sample_chat_history, support_vision=support_vision
+        )
+
+        assert agent.support_vision == expected
+
+    def test_convert_history_to_messages(self, mock_chat_model, sample_chat_history):
+        """测试聊天历史转换为消息"""
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        messages = agent.convert_history_to_messages()
+
+        assert len(messages) == 3
+        assert isinstance(messages[0], SystemMessage)
+        assert isinstance(messages[1], HumanMessage)
+        assert isinstance(messages[2], AIMessage)
+
+    @pytest.mark.parametrize(
+        "role,expected_type",
+        [
+            (PromptRole.USER.value, HumanMessage),
+            (PromptRole.ASSISTANT.value, AIMessage),
+            (PromptRole.AI.value, AIMessage),
+            (PromptRole.SYSTEM.value, SystemMessage),
+        ],
+    )
+    def test_chat_history_to_langchain_messages(self, mock_chat_model, role, expected_type):
+        """测试不同角色的消息转换"""
+        chat_history = [ChatPrompt(role=role, content="Test content")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history)
+
+        messages = agent._chat_history_to_langchain_messages(chat_history)
+
+        assert len(messages) == 1
+        assert isinstance(messages[0], expected_type)
+
+    def test_convert_contents_skip_guide_role(self, mock_chat_model):
+        """测试跳过guide角色的内容"""
+        chat_history = [
+            ChatPrompt(role="guide", content="Guide content"),
+            ChatPrompt(role="user", content="User content"),
+        ]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history)
+
+        converted = agent._convert_contents(chat_history)
+
+        assert len(converted) == 1
+        assert converted[0].role == "user"
+
+    def test_convert_contents_hidden_to_user(self, mock_chat_model):
+        """测试hidden角色转换为user"""
+        chat_history = [ChatPrompt(role="hidden", content="Hidden content")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history)
+
+        converted = agent._convert_contents(chat_history)
+
+        assert len(converted) == 1
+        assert converted[0].role == "user"
+
+    def test_convert_contents_pause_to_assistant(self, mock_chat_model):
+        """测试pause角色转换为assistant"""
+        chat_history = [ChatPrompt(role="pause", content="Pause content")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history)
+
+        converted = agent._convert_contents(chat_history)
+
+        assert len(converted) == 1
+        assert converted[0].role == "assistant"
+
+    def test_convert_contents_user_image_without_vision_support(self, mock_chat_model):
+        """测试不支持视觉时处理用户图片"""
+        chat_history = [ChatPrompt(role="user-image", content="![image](http://example.com/image.jpg)")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history, support_vision=False)
+
+        with pytest.raises(AgentException):
+            agent._convert_contents(chat_history)
+
+    def test_convert_contents_user_image_with_vision_support(self, mock_chat_model):
+        """测试支持视觉时处理用户图片"""
+        chat_history = [ChatPrompt(role="user-image", content="![image](http://example.com/image.jpg)")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history, support_vision=True)
+
+        converted = agent._convert_contents(chat_history)
+
+        assert len(converted) == 1
+        assert converted[0].role == "user"
+        assert "image.jpg" in converted[0].content
+        assert len(agent.files) == 1
+
+    def test_convert_contents_deepseek_r1_system_to_user(self, mock_chat_model):
+        """测试deepseek-r1模型将system转换为user"""
+        mock_chat_model.model_name = "deepseek-r1-test"
+        chat_history = [ChatPrompt(role="system", content="System prompt")]
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=chat_history)
+
+        converted = agent._convert_contents(chat_history)
+
+        assert len(converted) == 1
+        assert converted[0].role == "user"
+
+    def test_model_name_property(self, mock_chat_model, sample_chat_history):
+        """测试model_name属性"""
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        assert agent.model_name == "test-model"
+
+    @pytest.mark.parametrize(
+        "has_tools,has_files,has_knowledge,expected",
+        [
+            (True, False, False, True),
+            (False, True, False, True),
+            (False, False, True, True),
+            (False, False, False, False),
+        ],
+    )
+    def test_is_run_by_agent(self, mock_chat_model, sample_chat_history, has_tools, has_files, has_knowledge, expected):
+        """测试是否需要通过agent运行"""
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        # 直接设置属性，避免Pydantic验证问题
+        if has_tools:
+            agent.tools = [Mock()]
+        if has_files:
+            agent.files = [{"name": "test.txt"}]
+        if has_knowledge:
+            agent.knowledge_bases = [{"id": 1}]
+
+        assert agent.is_run_by_agent() == expected
+
+    def test_execute_without_agent(self, mock_chat_model, sample_chat_history):
+        """测试不通过agent执行"""
+        # 创建一个正确的 AIMessage 返回值
+        from langchain_core.messages import AIMessage
+
+        mock_response = AIMessage(content="Test response", id="test-id")
+        mock_chat_model.invoke.return_value = mock_response
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        execute_kwargs = ExecuteKwargs(stream=False, run_agent=False)
+        result = agent.execute(execute_kwargs)
+
+        assert "choices" in result
+        assert "model" in result
+        mock_chat_model.invoke.assert_called_once()
+
+    @patch("aidev_agent.services.chat.ChatCompletionAgent._get_agent")
+    def test_execute_with_agent_non_stream(self, mock_get_agent, mock_chat_model, sample_chat_history):
+        """测试通过agent执行（非流式）"""
+        mock_agent_executor = Mock()
+        mock_config = Mock()
+        mock_get_agent.return_value = (mock_agent_executor, mock_config)
+
+        # 模拟异步调用结果
+        with patch("aidev_agent.services.chat.get_event_loop") as mock_loop:
+            mock_loop.return_value.run_until_complete.return_value = {"output": "Test response"}
+
+            agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+            # 直接设置工具属性以触发agent模式
+            agent.tools = [Mock()]
+
+            execute_kwargs = ExecuteKwargs(stream=False, run_agent=True)
+            result = agent.execute(execute_kwargs)
+
+            assert result == "Test response"
+
+    def test_stream_normal_content(self, mock_chat_model, sample_chat_history):
+        """测试流式处理正常内容"""
+        # 模拟流式响应
+        mock_chunks = [
+            Mock(content="Hello", additional_kwargs={}),
+            Mock(content=" world", additional_kwargs={}),
+            Mock(content="!", additional_kwargs={}),
+        ]
+        mock_chat_model.stream.return_value = iter(mock_chunks)
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        messages = agent.convert_history_to_messages()
+        result_generator = agent._stream(messages)
+
+        # 收集所有结果
+        results = list(result_generator)
+
+        # 验证结果格式
+        assert len(results) > 0
+        assert results[-1] == "data: [DONE]\n\n"
+
+    def test_stream_with_reasoning_content(self, mock_chat_model, sample_chat_history):
+        """测试流式处理包含推理内容"""
+        mock_chunks = [
+            Mock(content="", additional_kwargs={"reasoning_content": "Thinking..."}),
+            Mock(content="Answer", additional_kwargs={}),
+        ]
+        mock_chat_model.stream.return_value = iter(mock_chunks)
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        messages = agent.convert_history_to_messages()
+        result_generator = agent._stream(messages)
+
+        results = list(result_generator)
+
+        # 验证包含推理和文本事件
+        data_lines = [line for line in results if line.startswith("data: ") and line != "data: [DONE]\n\n"]
+        assert len(data_lines) > 0
+
+    def test_stream_exception_handling(self, mock_chat_model, sample_chat_history):
+        """测试流式处理异常情况"""
+        mock_chat_model.stream.side_effect = Exception("Stream error")
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        messages = agent.convert_history_to_messages()
+        result_generator = agent._stream(messages)
+
+        results = list(result_generator)
+
+        # 验证包含错误信息
+        error_found = False
+        for result in results:
+            if "error" in result:
+                error_found = True
+                break
+
+        assert error_found
+
+    def test_invoke_non_stream(self, mock_chat_model, sample_chat_history):
+        """测试非流式调用"""
+        # 创建一个正确的 AIMessage 返回值
+        from langchain_core.messages import AIMessage
+
+        mock_response = AIMessage(content="Test response", id="test-id")
+        mock_chat_model.invoke.return_value = mock_response
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        messages = agent.convert_history_to_messages()
+        result = agent._invoke(messages)
+
+        assert "choices" in result
+        assert "model" in result
+        assert "id" in result
+        mock_chat_model.invoke.assert_called_once_with(input=messages)
+
+    @patch("aidev_agent.services.chat.ConversationTokenBufferMemory")
+    def test_get_memory_window(self, mock_memory_class, mock_chat_model, sample_chat_history):
+        """测试获取内存窗口"""
+        mock_memory = Mock()
+        mock_memory.buffer = sample_chat_history[:2]  # 模拟缓冲区
+        mock_memory_class.return_value = mock_memory
+
+        agent = ChatCompletionAgent(chat_model=mock_chat_model, chat_history=sample_chat_history)
+
+        window_size = agent.get_memory_window(max_token_limit=4096)
+
+        # 验证返回值为缓冲区长度与聊天历史长度的差值
+        expected = len(mock_memory.buffer) - len(sample_chat_history)
+        assert window_size == expected

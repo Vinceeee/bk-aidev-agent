@@ -57,3 +57,13 @@ clean:
 	rm -rf ./dist
 	rm -rf .venv
 	uv clean
+
+.PHONY: ci-test
+ci-test:
+	$(eval path ?= ${ROOT_DIR}/tests)
+	$(eval maxfail ?= --maxfail=2)
+	$(eval warnings ?= --disable-pytest-warnings)
+	${pytest} ${path} \
+		--durations=30 \
+		--cov-config ${ROOT_DIR}/pyproject.toml \
+		--cov ${ROOT_DIR}
