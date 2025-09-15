@@ -1,24 +1,22 @@
 [project]
-authors = [
-    {name = "blueking"},
-]
-license = {text = "MIT"}
+authors = [{ name = "blueking" }]
+license = { text = "MIT" }
 requires-python = "<4.0,>=3.10.5"
 dependencies = [
-    "environs<15.0.0,>=14.1.0",
-    "langchain<1.0.0,>=0.3.14",
-    "langchain-openai<1.0.0,>=0.3.0",
-    "langchain-community==0.3.28",
-    "pyro4<5.0,>=4.82",
-    "langfuse<3",
-    "bkapi-client-core<2.0.0,>=1.2.0",
-    "jinja2<4.0.0,>=3.1.6",
-    "cachetools<6.0.0,>=5.5.2",
-    "asgiref<4.0.0,>=3.8.1",
-    "werkzeug<4.0.0,>=3.1.3",
-    "pytz<2026.0,>=2025.2",
-    "h11==0.16.0",
-    "langchain-mcp-adapters<1.0.0,>=0.1.9",
+  "environs<15.0.0,>=14.1.0",
+  "langchain<1.0.0,>=0.3.14",
+  "langchain-openai<1.0.0,>=0.3.0",
+  "langchain-community==0.3.28",
+  "pyro4<5.0,>=4.82",
+  "langfuse<3",
+  "bkapi-client-core<2.0.0,>=1.2.0",
+  "jinja2<4.0.0,>=3.1.6",
+  "cachetools<6.0.0,>=5.5.2",
+  "asgiref<4.0.0,>=3.8.1",
+  "werkzeug<4.0.0,>=3.1.3",
+  "pytz<2026.0,>=2025.2",
+  "h11==0.16.0",
+  "langchain-mcp-adapters<1.0.0,>=0.1.9",
 ]
 name = "aidev-agent"
 version = "1.0.0b38"
@@ -26,16 +24,16 @@ description = "bkaidev agent builder"
 
 [dependency-groups]
 dev = [
-    "ipdb<0.14.0,>=0.13.13",
-    "pytest<7.5.0,>=7.4.4",
-    "pytest-asyncio<0.24.0,>=0.23.3",
-    "pytest-env<1.2.0,>=1.1.3",
-    "pytest-cov<4.2.0,>=4.1.0",
-    "pytest-timeout==2.3.1",
-    "pre-commit==4.0.1",
-    "faker<38.0.0,>=37.0.0",
-    "pytest-mock<4.0.0,>=3.14.0",
-    "pytest-dotenv<1.0.0,>=0.5.2",
+  "ipdb<0.14.0,>=0.13.13",
+  "pytest<7.5.0,>=7.4.4",
+  "pytest-asyncio<0.24.0,>=0.23.3",
+  "pytest-env<1.2.0,>=1.1.3",
+  "pytest-cov<4.2.0,>=4.1.0",
+  "pytest-timeout==2.3.1",
+  "pre-commit==4.0.1",
+  "faker<38.0.0,>=37.0.0",
+  "pytest-mock<4.0.0,>=3.14.0",
+  "pytest-dotenv<1.0.0,>=0.5.2",
 ]
 
 [tool.pdm.build]
@@ -45,29 +43,6 @@ includes = ["aidev_agent"]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
-[tool.ruff]
-exclude = ["*/config/", "*/migrations/"]
-force-exclude = true
-line-length = 120
-indent-width = 4
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "PIE", "PERF", "SIM"]
-ignore = ["PERF401", "E501"]
-
-[tool.ruff.format]
-quote-style = "double"
-
-[tool.ruff.lint.isort]
-# 总是显式制定 import section 的顺序
-section-order = [
-  "future",
-  "standard-library",
-  "third-party",
-  "first-party",
-  "local-folder",
-]
-relative-imports-order = "closest-to-furthest"
 
 [tool.pytest.ini_options]
 env_override_existing_values = 1
