@@ -2,6 +2,7 @@
 
 import copy
 import json
+from functools import wraps
 from itertools import chain
 from logging import getLogger
 
@@ -9,13 +10,12 @@ from aidev_agent.api.bk_aidev import BKAidevApi
 from aidev_agent.core.utils.local import request_local
 from aidev_agent.enums import PromptRole
 from aidev_agent.services.chat import ChatPrompt, ExecuteKwargs
-from bk_plugin_framework.kit.api import custom_authentication_classes
-from bk_plugin_framework.kit.decorators import inject_user_token, login_exempt
 from blueapps.core.exceptions import ClientBlueException
 from django.conf import settings
 from django.http.response import StreamingHttpResponse
 from django.utils.decorators import method_decorator
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.status import is_success
@@ -33,11 +33,39 @@ from aidev_bkplugin.utils import set_user_access_token
 logger = getLogger(__name__)
 
 
+def login_exempt(view_func):
+    """Mark a view function as being exempt from login view protection"""
+
+    def wrapped_view(*args, **kwargs):
+        return view_func(*args, **kwargs)
+
+    wrapped_view.login_exempt = settings.BKPAAS_ENVIRONMENT == "dev"
+    return wraps(view_func)(wrapped_view)
+
+
+def inject_user_token(view_func):
+    def wrapped_view(request, *args, **kwargs):
+        if settings.BKPAAS_ENVIRONMENT == "dev":
+            request.token = request.COOKIES.get(settings.USER_TOKEN_KEY_NAME, "")
+        else:
+            request.token = request.META.get("HTTP_X_BKAPI_JWT", "")
+        return view_func(request, *args, **kwargs)
+
+    return wraps(view_func)(wrapped_view)
+
+
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    """关闭csrf验证"""
+
+    def enforce_csrf(self, request):
+        return
+
+
 @method_decorator(login_exempt, name="dispatch")
 @method_decorator(inject_user_token, name="dispatch")
 class PluginViewSet(ViewSetMixin, APIView):
     permission_classes = [AgentPluginPermission]
-    authentication_classes = custom_authentication_classes
+    authentication_classes = [CsrfExemptSessionAuthentication] if settings.BKPAAS_ENVIRONMENT == "dev" else []
 
     def initialize_request(self, request, *args, **kwargs):
         if request.user:

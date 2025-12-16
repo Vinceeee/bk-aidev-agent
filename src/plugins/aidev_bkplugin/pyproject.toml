@@ -1,10 +1,14 @@
 [project]
 name = "aidev-bkplugin"
-version = "1.0.7.post2"
+version = "1.0.8.rc1"
 description = "AiDev Agent Bkplugin builtin functions"
 readme = "readme.md"
 requires-python = ">=3.11.9, <4"
-dependencies = ["aidev-agent>=1.0.5.post1,<1.1", "blueapps>=4.15.1, <5.0"]
+dependencies = [
+    "aidev-agent>=1.0.5.post1,<1.1",
+    "blueapps>=4.15.1, <5.0",
+    "djangorestframework==3.16.1",
+]
 
 
 [tool.pdm.build]
