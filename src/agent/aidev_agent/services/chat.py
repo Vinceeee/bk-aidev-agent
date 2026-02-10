@@ -175,21 +175,11 @@ class ChatCompletionAgent(BaseModel):
         cfg["configurable"]["execute_kwargs"] = execute_kwargs
         messages = [msg for msg in messages]
         if execute_kwargs.stream:
-            body = {
-                "thread_id": self.thread_id,
-                "run_id": messages[-1].id or uuid.uuid4().hex,
-                "state": {},
-                "messages": langchain_messages_to_agui(messages),
-            }
-            agent_input = AgentInput(**body)
-            agui_entry = AidevAGUIAgent(
-                name="test_agui_agent",
-                graph=agent_e,
-                event_handler=self.event_handler,
-                config=cfg,
-                tools={each.name: each for each in self.tools} if self.tools else {},
-            )
-            return self._stream_with_queue(agui_entry, agent_input)
+            if execute_kwargs.legacy_streaming:
+                return self._stream_with_legacy(agent_e, cfg, messages)
+            else:
+                return self._stream(agent_e, cfg, messages)
+
         else:
             loop = get_event_loop()
             result = loop.run_until_complete(
@@ -203,6 +193,31 @@ class ChatCompletionAgent(BaseModel):
                 "reference_doc": result.get("reference_doc", []),
             }
             return return_data
+
+    def _stream_with_legacy(
+        self, agent_e: Runnable, cfg: RunnableConfig, messages: list[BaseMessage]
+    ) -> Generator[Any, None, None]:
+        _input = {"messages": messages}
+        return agent_e.agent.stream_standard_event(agent_e, cfg, _input)
+
+    def _stream(
+        self, agent_e: Runnable, cfg: RunnableConfig, messages: list[BaseMessage]
+    ) -> Generator[Any, None, None]:
+        body = {
+            "thread_id": self.thread_id,
+            "run_id": messages[-1].id or uuid.uuid4().hex,
+            "state": {},
+            "messages": langchain_messages_to_agui(messages),
+        }
+        agent_input = AgentInput(**body)
+        agui_entry = AidevAGUIAgent(
+            name="test_agui_agent",
+            graph=agent_e,
+            event_handler=self.event_handler,
+            config=cfg,
+            tools={each.name: each for each in self.tools} if self.tools else {},
+        )
+        return self._stream_with_queue(agui_entry, agent_input)
 
     def _stream_with_queue(self, agui_entry: AidevAGUIAgent, agent_input: AgentInput) -> Generator[Any, None, None]:
         """使用队列处理器缓存流式请求，支持断点续传

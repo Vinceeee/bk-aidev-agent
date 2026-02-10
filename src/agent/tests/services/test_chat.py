@@ -395,7 +395,7 @@ class TestCommonAgentChatStreamingLive:
     """测试聊天代理的流式响应功能"""
 
     def setup_method(self):
-        self.llm = ChatModel.get_setup_instance(model="qwen3-235B")
+        self.llm = ChatModel.get_setup_instance(model="gptoss-120b")
 
     def test_knowledge_base(self):
         """case 1: 知识库"""
@@ -412,3 +412,69 @@ class TestCommonAgentChatStreamingLive:
             result = agent.execute(ExecuteKwargs(stream=True))
             for each in result:
                 fo.write(each)
+
+    def test_tool_call_legacy(self):
+        """case 2: 知识库"""
+        agent = ChatCompletionAgent(
+            chat_model=self.llm,
+            chat_history=[
+                ChatPrompt(role="user", content="今天广州天气怎么样?"),
+            ],
+            tools=[get_weather],
+        )
+        with open("text.log", "w") as fo:
+            result = agent.execute(ExecuteKwargs(stream=True, legacy_streaming=True))
+            for each in result:
+                fo.write(each)
+
+    def test_knowledge_base_legacy(self):
+        """case 3: 知识库 legacy streaming"""
+        with open("tests/mock_data/knowledgebase.json") as fi:
+            knowledgebase = json.load(fi)
+        agent = ChatCompletionAgent(
+            chat_model=self.llm,
+            chat_history=[
+                ChatPrompt(role="user", content="云桌面黑屏怎么处理?"),
+            ],
+            knowledge_bases=[knowledgebase],
+        )
+        with open("text.log", "w") as fo:
+            result = agent.execute(ExecuteKwargs(stream=True, legacy_streaming=True))
+            for each in result:
+                fo.write(each)
+
+
+class TestCommonAgentChatStreamingWithAgent:
+    """测试聊天代理的流式响应功能"""
+
+    def test_basic_chat(self):
+        """case 1: 基础聊天测试"""
+        llm = MockChatModel(
+            responses=["你好\n我可以帮你什么?"],
+            reasoning_contents=["用户希望我帮他复述一下上下文"],
+            stream_chunk_size=2,
+        )
+        agent = ChatCompletionAgent(
+            chat_model=llm,
+            chat_history=[
+                ChatPrompt(
+                    id="1",
+                    role="system",
+                    content="You are a professional translator, please help translate the user input to English.",
+                ),
+                ChatPrompt(id="2", role="user", content="안녕하세요"),
+                ChatPrompt(id="3", role="assistant", content="Hello, how can I help you?"),
+                ChatPrompt(id="4", role="user", content="复述一下上下文的内容"),
+            ],
+        )
+        results = []
+        for each in agent.execute(ExecuteKwargs(stream=True, legacy_streaming=True)):
+            if each == "data: [DONE]\n\n":
+                continue
+            _each = json.loads(each[6:])
+            results.append(_each)
+        # Legacy stream uses "event": "think" / "text" and "content"
+        think_contents = [e.get("content", "") for e in results if e.get("event") == "think"]
+        text_contents = [e.get("content", "") for e in results if e.get("event") == "text"]
+        assert "".join(think_contents) == "用户希望我帮他复述一下上下文"
+        assert "".join(text_contents) == "你好\n我可以帮你什么?"

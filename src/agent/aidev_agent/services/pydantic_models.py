@@ -23,6 +23,9 @@ class ExecuteKwargs(BaseModel):
     caller_order_type: str | None = Field(default=None, description="调用AI工单类型")
     caller_trace_context: Dict[str, Any] | None = Field(default=None, description="调用链ID")
 
+    # 执行配置
+    legacy_streaming: bool = Field(default=False, description="是否使用 legacy streaming protocol")
+
 
 class SessionTool(BaseModel):
     tool_id: int
