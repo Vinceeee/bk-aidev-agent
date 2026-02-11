@@ -4,7 +4,14 @@ import uuid
 from logging import getLogger
 from typing import Any, Generator
 
-from .base import EOD_CHUNK, HEARTBEAT_CHUNK, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, BaseMessageQueueHandler
+from .base import (
+    CANCELLED_CHUNK,
+    EOD_CHUNK,
+    HEARTBEAT_CHUNK,
+    HEARTBEAT_INTERVAL,
+    HEARTBEAT_TIMEOUT,
+    BaseMessageQueueHandler,
+)
 from .factory import message_handler_factory
 
 logger = getLogger(__name__)
@@ -99,6 +106,11 @@ class GeneratorStreamingHelper:
                             self.message_handler.mark_completed(self.thread_id)
                             logger.info(f"Stream completed for thread_id={self.thread_id}")
                             return
+                        if item == CANCELLED_CHUNK:
+                            # 主动取消，同样清理队列并结束
+                            self.message_handler.mark_completed(self.thread_id)
+                            logger.info(f"Stream cancelled for thread_id={self.thread_id}")
+                            return
                         yield item
                 except TimeoutError:
                     # 超时，检查心跳是否超时
@@ -128,8 +140,12 @@ class GeneratorStreamingHelper:
         """
 
         last_heartbeat_time = time.time()
+        cancelled = False
         try:
             for chunk in generator:
+                if self.message_handler.is_cancel_requested(self.thread_id):
+                    cancelled = True
+                    break
                 self.message_handler.put(self.thread_id, chunk)
                 logger.debug(f"Produced chunk for thread_id={self.thread_id}")
                 # 检查是否需要发送心跳
@@ -143,8 +159,8 @@ class GeneratorStreamingHelper:
         except Exception as e:
             logger.debug(f"Sent error chunk for thread_id={self.thread_id}: {e}")
         finally:
-            # 生产者完成，推送结束标记
-            self.message_handler.put(self.thread_id, EOD_CHUNK)
-            # 立即刷新缓冲区，确保 EOD_CHUNK 被及时发送到队列
+            # 生产者完成：主动取消发 CANCELLED_CHUNK，否则发 EOD_CHUNK
+            end_chunk = CANCELLED_CHUNK if cancelled else EOD_CHUNK
+            self.message_handler.put(self.thread_id, end_chunk)
             self.message_handler.flush(self.thread_id)
-            logger.debug(f"Producer finished, sent EOD_CHUNK for thread_id={self.thread_id}")
+            logger.debug(f"Producer finished, sent {end_chunk} for thread_id={self.thread_id}")

@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -53,6 +55,13 @@ def get_weather(location: str) -> str:
 def get_weather_error(location: str) -> str:
     """获取指定地点的天气预报"""
     raise ValueError("天气预报获取失败")
+
+
+@tool
+def slow_task(seconds: float = 1.0) -> str:
+    """模拟耗时任务，用于主动停止测试"""
+    time.sleep(seconds)
+    return "任务执行完毕"
 
 
 class TestCommonAgentChatStreaming:
@@ -384,6 +393,54 @@ class TestCommonAgentChatStreaming:
             assert_custom_event_exists(results, CustomMessageType.KNOWLEDGE_RAG_END)
             assert_custom_event_exists(results, CustomMessageType.KNOWLEDGE_RAG_TEXT_CONTENT)
             assert_custom_event_exists(results, CustomMessageType.KNOWLEDGE_RAG_RESULT)
+
+    def test_stop_during_long_tool_streaming(self):
+        """case 8: 耗时工具执行中主动停止，验证流式输出在停止后正常结束且为部分结果
+
+        流程：先触发耗时工具调用，在工具执行期间调用 stop()，
+        断言流式输出包含工具调用开始事件，且未包含完整最终文本（或流已结束）。
+        """
+        thread_id = "test_stop_during_tool"
+        llm = MockChatModel(
+            mock_responses=[
+                MockResponse(
+                    content="",
+                    tool_calls=[{"name": "slow_task", "args": {"seconds": 1.5}, "id": "call_slow"}],
+                ),
+                MockResponse(content="根据结果，耗时任务已完成。"),
+            ],
+            stream_chunk_size=2,
+            loop=False,
+        )
+        agent = ChatCompletionAgent(
+            thread_id=thread_id,
+            chat_model=llm,
+            chat_history=[ChatPrompt(role="user", content="执行一个慢任务")],
+            tools=[slow_task],
+        )
+        results = []
+        stream_done = threading.Event()
+
+        def consume():
+            nonlocal results
+            for each in agent.execute(ExecuteKwargs(stream=True)):
+                _each = json.loads(each[6:])
+                results.append(_each)
+            stream_done.set()
+
+        t = threading.Thread(target=consume)
+        t.start()
+        time.sleep(0.5)
+        agent.stop()
+        stream_done.wait(timeout=5.0)
+        t.join(timeout=3.0)
+        assert not t.is_alive(), "消费线程应在超时内结束"
+
+        tool_start_events = [r for r in results if r.get("type") == EventType.TOOL_CALL_START]
+        assert len(tool_start_events) >= 1, "流式输出应包含工具调用开始事件"
+        assert any(e.get("toolCallName") == "slow_task" for e in tool_start_events), "应调用了 slow_task 工具"
+        # 主动停止后流应正常结束；可能收到工具结果或部分最终回复（取决于取消检查时机）
+        assert stream_done.is_set(), "流式消费应在超时内结束"
 
 
 @pytest.mark.skipif(

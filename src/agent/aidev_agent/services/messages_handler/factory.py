@@ -12,4 +12,4 @@ message_handler_factory: SingletonFactory[str, BaseMessageQueueHandler] = Single
 if os.getenv("RABBITMQ_HOST", ""):
     from .rabbitmq import RabbitMQMessageHandler
 
-    message_handler_factory.register("rabbitmq", RabbitMQMessageHandler())
+    message_handler_factory.replace_defaults(RabbitMQMessageHandler())

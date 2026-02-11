@@ -166,6 +166,13 @@ class ChatCompletionAgent(BaseModel):
         self.chat_model.callbacks = self.callbacks
         return self._execute(messages, execute_kwargs)
 
+    def stop(self):
+        helper = GeneratorStreamingHelper(
+            thread_id=self.thread_id,
+        )
+        if not helper.message_handler.is_cancel_requested(self.thread_id):
+            helper.message_handler.request_cancel(self.thread_id)
+
     def _execute(self, messages: list[BaseMessage], execute_kwargs: ExecuteKwargs):
         if not messages:
             raise ValueError("The messages list cannot be empty.")
